@@ -1089,9 +1089,10 @@ function renderDash(forWho, label){
 /* ================== 画面：管理 ================== */
 function renderAdmin(){
   const sec=S.adminSection;
-  const subs=[["dash","全体ダッシュボード"],["members","メンバー"],["masters","マスタ"],["alert","アラート日数"],["invite","招待・アカウント"],["import","データ移行"]];
+  const subs=[["dash","全体ダッシュボード"],["members","メンバー"],["masters","マスタ"],["alert","アラート日数"],["invite","招待・アカウント"],["orig","元アプリ連携"],["import","データ移行"]];
   let body="";
   if(sec==="import") body=renderImport();
+  else if(sec==="orig") body=renderOrigSync();
   else if(sec==="invite") body=renderInvites();
   else if(sec==="dash"){ const who=S.adminDashWho;
     body=`<div class="toolbar"><label class="filter">担当者<select id="adminDashWho"><option value="">全員</option>${(S.members||[]).map(m=>`<option value="${esc(m.id)}"${who===m.id?" selected":""}>${esc(m.name)}</option>`).join("")}</select></label></div>`+renderDash(who||null, who?memberName(who)+"さんの数字":"全員の数字"); }
@@ -1117,6 +1118,18 @@ function renderAdmin(){
       <div style="margin-top:12px"><button class="btn primary" id="saveAlert">保存</button></div></section>`;
   }
   return `<div class="admin-sub">${subs.map(([k,l])=>`<button class="btn${sec===k?" primary":""}" data-admin-sec="${k}">${l}</button>`).join("")}</div>${body}`;
+}
+function renderOrigSync(){
+  const o=S.origSync, r=o.report;
+  const fmt=t=>{ const d=new Date(t); return isNaN(d)?"—":`${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`; };
+  return `<section class="dcard" style="max-width:640px"><h3>元アプリへの自動反映</h3>
+    <p class="note">このアプリで見込み顧客・アポ目標を記入すると、元アプリ（arxcs-kojin-sheet-nyuryoku.web.app）にも自動で同じ内容が書き込まれます（このアプリ → 元アプリの一方向）。このアプリで削除した人は、元アプリからも削除されます。</p>
+    <div class="mini-list">
+      <div class="mini-row"><span>この端末での自動反映</span><span>成功 ${o.ok}件${o.failed?`・<b style="color:#c62828">失敗 ${o.failed}件</b>（${esc(o.lastError)}）`:""}</span></div>
+      <div class="mini-row"><span>前回の一括反映</span><span>${r?`${fmt(r.lastRun||r.at)}：更新 ${r.written||0}件・削除 ${r.deleted||0}件${r.members?`・担当者追加 ${r.members}人`:""}${r.failed?`・失敗 ${r.failed}件`:""}`:"まだありません"}</span></div>
+    </div>
+    <div style="margin-top:12px"><button class="btn primary" id="origSyncBtn"${o.running?" disabled":""}>${o.running?"反映中…":"元アプリへ一括反映"}</button></div>
+    <p class="note">通信が切れていたときなどの取りこぼしを、まとめて元アプリへ反映します（管理者が開いたとき、1日1回は自動で実行）。元アプリ側で後から直された人は上書きしません。元アプリの担当者リストにいない担当者は、元アプリにも追加します。</p></section>`;
 }
 async function saveMasters(patch){
   if(!S.isAdmin) return;
@@ -1412,6 +1425,7 @@ function bindApp(){
     try{ await enqueue("roles",()=>S.db.doc("settings/roles").set({adminMembers:[...cur]})); toast("保存しました"); }catch(e){ writeFailed(e); } });
   $$("[data-mem-active]",app).forEach(el=>el.onchange=async()=>{ try{ await enqueue("m/"+el.dataset.memActive,()=>S.db.doc("members/"+el.dataset.memActive).update({active:el.checked})); }catch(e){ writeFailed(e); } });
   const amb=document.getElementById("addMemberBtn"); if(amb) amb.onclick=async()=>{ const i=document.getElementById("newMemberName"), n=i.value.trim(); if(!n){ i.focus(); return; } if(await addMember(n)) toast(`${n} さんを追加しました`); };
+  const osb=document.getElementById("origSyncBtn"); if(osb) osb.onclick=()=>syncAllToOrig(true);
   const smb=document.getElementById("saveMasters"); if(smb) smb.onclick=()=>{ const lines=k=>{ const seen=new Set(); return app.querySelector(`[data-master="${k}"]`).value.split("\n").map(s=>s.trim()).filter(s=>s&&!seen.has(s)&&seen.add(s)); };
     const unis=lines("universities").map(l=>{ const i=l.lastIndexOf(","), j=l.lastIndexOf("，"), k=Math.max(i,j); if(k<0) return {name:l,region:"未設定"}; const r=l.slice(k+1).trim(); return {name:l.slice(0,k).trim(), region:REGION_OPTIONS.includes(r)?r:"未設定"}; });
     saveMasters({universities:unis, events:lines("events"), clubs:lines("clubs"), routes:lines("routes"), gradYears:lines("gradYears"), proposals:lines("proposals")}); };
@@ -1445,19 +1459,126 @@ function makeDb(fs){
   const docRef = p => { const r=fdoc(fs,p); return {
     id:r.id, path:p,
     get: async()=>wrap(await getDoc(r)),
-    set: d=>setDoc(r, stamp(d)),
-    update: d=>updateDoc(r, stamp(d)),
+    set: d=>setDoc(r, stamp(d)).then(x=>{ mirrorWrite(p, d, "set"); return x; }),
+    update: d=>updateDoc(r, stamp(d)).then(x=>{ mirrorWrite(p, d, "update"); return x; }),
     delete: ()=>deleteDoc(r),
     onSnapshot: (n,e)=>fsnap(r, s=>n(wrap(s)), e)
   }; };
   const colRef = p => ({
     path:p,
     doc: id => id ? docRef(p+"/"+id) : docRef(fdoc(fcol(fs,p)).path),
-    add: async d => { const r=await addDoc(fcol(fs,p), stamp(d)); return docRef(r.path); },
+    add: async d => { const r=await addDoc(fcol(fs,p), stamp(d)); mirrorWrite(r.path, d, "set"); return docRef(r.path); },
     onSnapshot: (n,e)=>fsnap(fcol(fs,p), s=>n({docs:s.docs.map(wrap), metadata:s.metadata}), e)
   });
   return { doc:docRef, collection:colRef, fs };
 }
+/* ================== 元アプリ（arxcs-kojin-sheet-nyuryoku.web.app）への自動反映 ==================
+   このアプリで見込み顧客・アポ目標を書き込むと、同じ内容を元アプリのデータベースにも書き込む（一方向：このアプリ → 元アプリ）。
+   ・元アプリの形（項目名・空欄は""・日時はTimestamp・イベントは eventName）に直してから書く
+   ・名前もSNSも空の新しい行は書かない（書き始めた時点で反映）。このアプリで削除した人は元アプリからも削除
+   ・書き込みに失敗しても、このアプリ側の保存には影響しない。取りこぼしは管理者の「元アプリへ一括反映」（1日1回は自動）で補う */
+const ORIG_CONFIG={apiKey:"AIzaSyBa3O7Z-z7UyAN2Q1hRJyqVEws78YG9iB4",authDomain:"arxcs-saltandpepper.firebaseapp.com",projectId:"arxcs-saltandpepper",storageBucket:"arxcs-saltandpepper.firebasestorage.app",messagingSenderId:"118949983791",appId:"1:118949983791:web:d5552e6df95aaa411b38da"};
+const ORIG_FIELDS=["ownerUid","member","lastName","firstName","lastNameFurigana","firstNameFurigana","university","gradYear","club","route","accountName",
+  "interview1","interview2","interview3","a2","dml","proposal","proposalDate","participationDate","enrolled","declined","memo","minutes","eventName","initialActionDate","stage","contactedAt"];
+const ORIG_OWNER_MAP={ mmwa844as1ilh:"kumazawa" }; // 元アプリでは増田さんが「kumazawa」の枠を使っている
+const ORIG_SYNC_EVERY=24*60*60*1000;
+let origFsP=null;
+function origDb(){
+  if(!origFsP) origFsP=(async()=>{
+    const A=await import("https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js");
+    const F=await import("https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js");
+    const app=A.getApps().find(a=>a.name==="orig") || A.initializeApp(ORIG_CONFIG,"orig");
+    return { F, fs:F.getFirestore(app) };
+  })().catch(e=>{ origFsP=null; throw e; });
+  return origFsP;
+}
+const isBlankCand = c => !String(c.lastName||"").trim() && !String(c.firstName||"").trim() && !String(c.accountName||"").trim();
+const toDateObj = v => v ? (v.toDate ? v.toDate() : (typeof v==="string"||typeof v==="number" ? new Date(v) : (v.seconds!=null ? new Date(v.seconds*1000) : null))) : null;
+// このアプリの見込み顧客 → 元アプリの形
+function toOrigCand(c, F){
+  const o={};
+  ORIG_FIELDS.forEach(k=>{ const v=c[k]; o[k]=(v==null)?"":(typeof v==="string"?v:String(v)); });
+  const ev=eventEntriesOf(c); o.eventName=ev.length?String(ev[ev.length-1]):"";
+  o.stage=computeStage(c);
+  o.ownerUid=ORIG_OWNER_MAP[c.ownerUid]||c.ownerUid||"";
+  if(!o.member && c.ownerUid) o.member=memberName(c.ownerUid)||"";
+  if(F){ const d=toDateObj(c.createdAt); if(d && !isNaN(d)) o.createdAt=F.Timestamp.fromDate(d); }
+  return o;
+}
+S.origSync={ok:0, failed:0, lastError:"", running:false, report:null};
+async function mirrorCandidate(id, patch){
+  try{
+    const {F,fs}=await origDb(); const ref=F.doc(fs,"candidates",id);
+    if(patch && patch.deleted===true){ await F.deleteDoc(ref); S.origSync.ok++; return; }
+    const full={...((S.cmap&&S.cmap.get(id))||S.candidates.find(c=>c.id===id)||{}), ...(patch||{})};
+    if(full.deleted){ await F.deleteDoc(ref); S.origSync.ok++; return; }
+    if(isBlankCand(full)) return;
+    await F.setDoc(ref, {...toOrigCand(full,F), updatedAt:F.serverTimestamp()}, {merge:true});
+    S.origSync.ok++;
+  }catch(e){ S.origSync.failed++; S.origSync.lastError=(e&&e.code)||String(e); console.warn("元アプリへの反映に失敗しました", id, e); }
+}
+async function mirrorApo(id, d){
+  try{
+    const {F,fs}=await origDb(); const years=(d&&d.years)||{};
+    const id2=ORIG_OWNER_MAP[id]||id;
+    await F.setDoc(F.doc(fs,"apoGoals",id2), years);
+    S.origSync.ok++;
+  }catch(e){ S.origSync.failed++; S.origSync.lastError=(e&&e.code)||String(e); console.warn("元アプリへのアポ目標の反映に失敗しました", id, e); }
+}
+function mirrorWrite(path, d, kind){
+  if(S.importing || S.noMirror) return;
+  const [col,id,extra]=String(path).split("/"); if(!id || extra) return;
+  if(col==="candidates") mirrorCandidate(id, d);
+  else if(col==="apoGoals") mirrorApo(id, d);
+}
+// 取りこぼし分をまとめて反映：このアプリの方が新しい人だけを元アプリへ書く（元アプリで後から直した分は上書きしない）
+async function syncAllToOrig(manual){
+  if(!S.isAdmin || !S.cmap || S.origSync.running) return;
+  S.origSync.running=true; if(manual) render(true);
+  const rep={checked:0, written:0, deleted:0, members:0, failed:0, at:new Date().toISOString()};
+  try{
+    const {F,fs}=await origDb();
+    const [oc,om]=await Promise.all([F.getDocs(F.collection(fs,"candidates")), F.getDocs(F.collection(fs,"memberList"))]);
+    const omap=new Map(oc.docs.map(d=>[d.id,d.data()]));
+    const ms=v=>{ const d=toDateObj(v); return d&&!isNaN(d)?d.getTime():0; };
+    const ops=[];
+    for(const c of S.cmap.values()){
+      const o=omap.get(c.id); rep.checked++;
+      if(c.deleted){ if(o) ops.push(()=>F.deleteDoc(F.doc(fs,"candidates",c.id)).then(()=>rep.deleted++)); continue; }
+      if(isBlankCand(c)) continue;
+      const want=toOrigCand(c,F);
+      if(o){
+        const same=ORIG_FIELDS.every(k=>String(o[k]??"")===want[k]); if(same) continue;
+        if(ms(o.updatedAt) > ms(c.updatedAt)) continue; // 元アプリの方が新しい
+      }
+      ops.push(()=>F.setDoc(F.doc(fs,"candidates",c.id), {...want, updatedAt:F.serverTimestamp()}, {merge:true}).then(()=>rep.written++));
+    }
+    // 元アプリの担当者リストにいない（このアプリで有効な）担当者を追加して、元アプリでもその人のシートが開けるようにする
+    const omIds=new Set(om.docs.map(d=>d.id)); const mapped=new Set(Object.keys(ORIG_OWNER_MAP));
+    (S.members||[]).filter(m=>m.active!==false && m.id!=="unassigned" && !omIds.has(m.id) && !mapped.has(m.id)).forEach(m=>{
+      ops.push(()=>F.setDoc(F.doc(fs,"memberList",m.id), {name:m.name||"", active:true, order:m.order??999, createdAt:F.serverTimestamp()}).then(()=>rep.members++));
+    });
+    let i=0; const worker=async()=>{ while(i<ops.length){ const op=ops[i++]; try{ await op(); }catch(e){ rep.failed++; console.warn(e); } } };
+    await Promise.all([worker(),worker(),worker(),worker()]);
+    S.db.doc("settings/origSync").set({lastRun:rep.at, ...rep}).catch(()=>{});
+  }catch(e){ rep.failed++; rep.error=(e&&e.code)||String(e); console.warn("元アプリへの一括反映に失敗しました", e); }
+  S.origSync.report=rep; S.origSync.running=false; render(true);
+  if(manual) toast(rep.error?"元アプリへ反映できませんでした（"+rep.error+"）":`元アプリへ反映しました（更新 ${rep.written}件・削除 ${rep.deleted}件${rep.members?`・担当者追加 ${rep.members}人`:""}${rep.failed?`・失敗 ${rep.failed}件`:""}）`,6000);
+}
+// 管理者が開いたとき、前回の一括反映から1日以上たっていれば裏で実行
+async function maybeAutoSyncOrig(){
+  if(!S.isAdmin || S.autoSyncChecked) return; S.autoSyncChecked=true;
+  try{
+    const snap=await S.db.doc("settings/origSync").get(); const last=snap.exists?Date.parse(snap.data().lastRun||0):0;
+    if(!snap.exists) return; // 初回の一括反映は管理画面から手動で行う
+    S.origSync.report=S.origSync.report||snap.data();
+    if(Date.now()-last<ORIG_SYNC_EVERY) return;
+    const wait=()=>new Promise(r=>setTimeout(r,3000));
+    for(let t=0;t<40 && !(S.cmap&&S.cmap.size);t++) await wait(); // 見込み顧客の読み込みを待つ
+    await wait(); syncAllToOrig(false);
+  }catch(e){ console.warn(e); }
+}
+
 async function googleSignIn(){
   const provider=new GoogleAuthProvider(); provider.setCustomParameters({prompt:"select_account"});
   S.signingIn=true; S.authErr=null; render(true);
@@ -1496,6 +1617,7 @@ function startData(){
   // 見込み顧客：前回この端末に保存した分をすぐ表示し、サーバーからは「前回以降に変わった分」だけを読む（無料枠の読み込み回数を節約）
   (async()=>{
     const col=fcol(fs,"candidates"); const cmap=new Map(); let maxMs=0;
+    S.cmap=cmap;
     const absorb=(id,data)=>{ cmap.set(id,{...data,id}); const t=data.updatedAt&&data.updatedAt.toMillis?data.updatedAt.toMillis():0; if(t>maxMs) maxMs=t; };
     const publish=()=>{ S.candidates=[...cmap.values()].filter(c=>!c.deleted); render(); };
     S.absorbLocal=(id,data)=>{ const {updatedAt,...rest}=data; const prev=cmap.get(id)||{}; cmap.set(id,{...prev,...rest,id}); };
@@ -1517,6 +1639,7 @@ function startData(){
 let adminStarted=false;
 function startAdminData(){
   if(adminStarted) return; adminStarted=true;
+  maybeAutoSyncOrig();
   const db=S.db, fail=e=>console.error(e);
   db.collection("accounts").onSnapshot(snap=>{ S.accounts=snap.docs.map(d=>({id:d.id,...d.data()}));
     (S.accounts||[]).forEach(a=>{ const m=(S.members||[]).find(x=>x.id===a.memberId); const em=(a.email||"").toLowerCase(); if(m && em && !m.email && !(S.members||[]).some(x=>x.email===em)) db.doc("members/"+m.id).update({email:em}).catch(()=>{}); });
