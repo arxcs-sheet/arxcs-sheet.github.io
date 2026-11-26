@@ -78,7 +78,7 @@ table.t tr:last-child td{border-bottom:none}
 .cell{width:100%;min-width:80px;padding:6px 8px;font-size:12px;border:1px solid var(--line);border-radius:6px;background:#fff}
 .cell:focus{outline:2px solid var(--ink);outline-offset:-1px}
 .cell[type=date]{min-width:128px}
-.cell.w-name{min-width:110px}.cell.w-uni{min-width:150px}.cell.w-s{min-width:84px}.cell.w-memo{min-width:150px}
+.cell.w-name{min-width:110px}.cell.w-uni{min-width:150px}.cell.w-s{min-width:84px}.cell.w-memo{min-width:150px}.cell.w-xs{width:52px;min-width:52px;text-align:center}.cell.w-date{width:132px;min-width:132px}
 .num{color:var(--sub);font-size:11px;text-align:center}
 .empty-row td{padding:28px;text-align:center;color:var(--sub);font-size:12px}
 .dup-row td{background:#fff5f4}
@@ -142,6 +142,15 @@ tr.new-row td,.iaa-t tr.new-row td.stk0,.iaa-t tr.new-row td.stk1{background:#f2
 .pill.s-面談1回目{background:#dbeafe;color:#1e40af}.pill.s-面談2回目{background:#c7dbfe;color:#1e3a8a}.pill.s-面談3回目{background:#b4ccfc;color:#1e3a8a}
 .pill.s-①A2基準達成{background:#ede9fe;color:#5b21b6}.pill.s-②DML動画配布{background:#f3e8ff;color:#7e22ce}
 .pill.s-③提案{background:#fce7f3;color:#9d174d}.pill.s-④提案日{background:#ffedd5;color:#9a3412}.pill.s-⑤参加{background:#fef9c3;color:#854d0e}
+.pill.m-未着手{background:#f3f4f6;color:#6b7280}.pill.m-インタビュー完了{background:#dbeafe;color:#1e40af}.pill.m-写真待ち{background:#fee2e2;color:#991b1b}.pill.m-作成中{background:#ffedd5;color:#9a3412}
+.pill.m-チェック依頼{background:#fef9c3;color:#854d0e}.pill.m-チェック完了{background:#ede9fe;color:#5b21b6}.pill.m-投稿予約完了{background:#ccfbf1;color:#115e59}.pill.m-投稿完了{background:#dcfce7;color:#166534}.pill.m-見送り{background:#f3f4f6;color:#9ca3af}
+.mag-sum{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:8px;margin-bottom:12px}
+.mag-sum button{border:1px solid var(--line);background:#fff;border-radius:12px;padding:8px 10px;text-align:left;cursor:pointer;font:inherit}
+.mag-sum button b{display:block;font-size:20px;line-height:1.2}.mag-sum button span{font-size:11px;color:var(--sub);font-weight:700}
+.mag-sum button.active{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
+.mag-sec td{background:#f7f8fa;font-weight:800;font-size:12px;color:var(--sub)}
+select.cell.mz-st{min-width:118px;font-weight:700}
+.t.mag-t td{vertical-align:middle}.mag-t .w-link{min-width:150px}
 .pill.s-⑥入会{background:#dcfce7;color:#166534}.pill.s-⑦見送り{background:#f3f4f6;color:#6b7280}.pill.s-イベント{background:#fef3c7;color:#92400e}
 .profile .n{font-weight:900;font-size:13px}.profile .f{font-size:10px;color:var(--sub)}
 .profile .m{font-size:10px;color:var(--sub);margin-top:2px}
@@ -306,7 +315,7 @@ const DEFAULT_ADMIN_MEMBERS = ["shiromizu","matsuoka"];
 const ADMIN_ALLOWED = ["shiromizu","matsuoka"];
 const TABS = [
   {id:"dash",label:"ダッシュボード"},{id:"apo",label:"アポ目標"},{id:"lead",label:"見込み顧客"},{id:"sched",label:"日程調整"},
-  {id:"mtg",label:"IAA"},{id:"event",label:"イベント"},{id:"overview",label:"担当リスト"},{id:"all",label:"全体リスト"},{id:"admin",label:"管理",admin:true}
+  {id:"mtg",label:"IAA"},{id:"event",label:"イベント"},{id:"mag",label:"マガジン"},{id:"overview",label:"担当リスト"},{id:"all",label:"全体リスト"},{id:"magall",label:"マガジン全体"},{id:"admin",label:"管理",admin:true}
 ];
 const STEPS = [
   {field:"interview1",label:"面談1回目"},{field:"interview2",label:"面談2回目"},{field:"interview3",label:"面談3回目"},
@@ -585,7 +594,7 @@ function renderTop(){
   const tabs=TABS.filter(t=>!t.admin || S.isAdmin);
   return `<div class="topbar"><div class="topbar-brand">${LOGO(24)}<div class="app-title brand-font">Arxcs<span> 個人シートアプリ</span></div></div>
     <div class="topbar-user"><span class="member-pill">${S.actingAs?"代理表示中：":"担当："}${esc(memberName(S.me))}</span>${S.actingAs?`<button class="btn" id="backToSelf">自分のシートに戻る</button>`:`<button class="btn" id="logoutBtn" title="${esc(S.email||"")}">ログアウト</button>`}<button class="nav-menu-btn" id="navMenuBtn" aria-label="メニュー">☰</button></div></div>
-    <nav class="tab-nav${S.navOpen?" open":""}">${tabs.map(t=>{ const n=t.id==="sched"?mine().filter(c=>c.schedStatus).length:0; return `<button class="tab-link${S.tab===t.id?" active":""}" data-tab="${t.id}">${t.label}${n?`<span class="tab-count">${n}</span>`:""}</button>`; }).join("")}</nav>`;
+    <nav class="tab-nav${S.navOpen?" open":""}">${tabs.map(t=>{ const n=t.id==="sched"?mine().filter(c=>c.schedStatus).length:t.id==="mag"?mine().filter(c=>isMag(c)&&magStatus(c)!=="投稿完了").length:0; return `<button class="tab-link${S.tab===t.id?" active":""}" data-tab="${t.id}">${t.label}${n?`<span class="tab-count">${n}</span>`:""}</button>`; }).join("")}</nav>`;
 }
 
 /* ================== 画面：アポ目標 ================== */
@@ -793,7 +802,7 @@ function bindFurigana(nameEl, furiEl, onUpdate){
 /* ================== 各シート共通の検索 ================== */
 // 行に data-qs（検索用の文字）を持たせ、入力のたびに表示/非表示だけ切り替える（日本語入力の変換を途切れさせない）
 S.q = S.q || {};
-function qText(c, extra){ return [fullName(c), fullName(c).replace(/\s/g,""), c.lastNameFurigana, c.firstNameFurigana, c.university, c.gradYear, c.club, c.route, c.accountName, c.instagram, c.memo, c.schedNote, c.proposal, ownerOf(c), computeStatus(c), extra||""].join(" ").toLowerCase(); }
+function qText(c, extra){ return [fullName(c), fullName(c).replace(/\s/g,""), c.lastNameFurigana, c.firstNameFurigana, c.university, c.gradYear, c.club, c.route, c.accountName, c.instagram, c.memo, c.schedNote, c.proposal, ownerOf(c), computeStatus(c), c.mzNote, extra||""].join(" ").toLowerCase(); }
 function qAttr(key, c, extra){ const t=qText(c,extra); const ws=words(S.q[key]); return ` data-qk="${key}" data-qs="${esc(t)}"${ws.length&&!wordsMatch(ws,t)?' style="display:none"':""}`; }
 function qBox(key, total, ph){
   const ws=words(S.q[key]);
@@ -947,6 +956,71 @@ function filterOv(scopeUid, f){
     if(f.university && c.university!==f.university) return false;
     if(ws.length){ const t=[fullName(c),fullName(c).replace(/\s/g,""),c.lastNameFurigana,c.firstNameFurigana,c.university,c.gradYear,c.club,c.route,c.accountName,c.memo,ownerOf(c),c.opsMember].join(" ").toLowerCase(); if(!ws.every(w=>t.includes(w))) return false; }
     return true; });
+}
+/* ================== 画面：マガジン（ルートが「マガジン」の学生の取材〜投稿の進捗） ==================
+   ルートに「マガジン」を選ぶと自動でここに出る。項目は見込み顧客と同じデータに保存（mz〜）。インタビュー原稿のリンクはIAAの「マガジン原稿」と同じ欄 */
+const MAG_STATUSES=["未着手","インタビュー完了","写真待ち","作成中","チェック依頼","チェック完了","投稿予約完了","投稿完了","見送り"];
+const isMag = c => /マガジン/.test(c.route||"") || !!c.mzStatus; // ルートが「マガジン」、または取材の進捗が入っている学生
+const magStatus = c => MAG_STATUSES.includes(c.mzStatus) ? c.mzStatus : "未着手";
+const magPill = st => `<span class="pill m-${esc(st)}">${esc(st)}</span>`;
+const magMonth = c => isDate(c.mzPostDate) ? c.mzPostDate.slice(0,7) : "";
+function renderMag(all){
+  const key=all?"magall":"mag";
+  const base=(all?S.candidates:mine()).filter(c=>isMag(c) && (nameOf(c)||c.accountName));
+  const f=S.magF=S.magF||{}; const ff=f[key]=f[key]||{};
+  const fm=all?(ff.member||""):"";
+  const pool=fm?base.filter(c=>c.ownerUid===fm):base;
+  // 投稿月（シートの月タブと同じ）
+  const months=[...new Set(pool.map(magMonth).filter(Boolean))].sort().reverse();
+  const mon=ff.month||""; // ""=すべて, "open"=未投稿, "YYYY-MM"
+  const byMonth=pool.filter(c=> !mon ? true : mon==="open" ? magStatus(c)!=="投稿完了" : magMonth(c)===mon);
+  const counts={}; byMonth.forEach(c=>{ const st=magStatus(c); counts[st]=(counts[st]||0)+1; });
+  const st=ff.status||"";
+  const list=st?byMonth.filter(c=>magStatus(c)===st):byMonth;
+  const rank=Object.fromEntries(MAG_STATUSES.map((x,i)=>[x,i]));
+  const open=list.filter(c=>!["投稿完了","見送り"].includes(magStatus(c))).sort((a,b)=>rank[magStatus(b)]-rank[magStatus(a)] || (a.mzInterviewDate||"9").localeCompare(b.mzInterviewDate||"9"));
+  const done=list.filter(c=>magStatus(c)==="投稿完了").sort((a,b)=>(b.mzPostDate||"").localeCompare(a.mzPostDate||""));
+  const skip=list.filter(c=>magStatus(c)==="見送り");
+  const canEdit=c=>S.canWrite && (c.ownerUid===S.me || S.isAdmin);
+  const cols=all?11:10;
+  let no=0;
+  const row=c=>{ no++; const ed=canEdit(c); const insta=linkHref("insta",c.instagram||c.accountName);
+    const tx=v=>esc(v||"")||"—"; const lk=(v,kind)=>{ const h=linkHref(kind,v); return h?`<a class="lk-go" href="${esc(h)}" target="_blank" rel="noopener noreferrer">↗</a>`:`<span class="lk-go off">—</span>`; };
+    return `<tr data-row="${c.id}"${qAttr(key,c,[magStatus(c),c.mzNote,c.mzNo].join(" "))}>
+      <td class="num stk0">${ed?cell(c.id,"mzNo",c.mzNo,"text","w-xs"):(c.mzNo?esc(c.mzNo):no)}</td>
+      <td class="stk1">${profileLine(c)}</td>
+      ${all?`<td style="white-space:nowrap;font-weight:700">${esc(ownerOf(c))}</td>`:""}
+      <td style="white-space:nowrap">${c.accountName?`<span>${esc(c.accountName)}</span> `:""}${insta?`<a class="lk-go" href="${esc(insta)}" target="_blank" rel="noopener" title="Instagramを開く">↗</a>`:""}</td>
+      <td>${ed?cell(c.id,"mzInterviewDate",c.mzInterviewDate,"date","w-date"):tx(md(c.mzInterviewDate))}</td>
+      <td>${ed?cell(c.id,"mzPostDate",c.mzPostDate,"date","w-date"):tx(md(c.mzPostDate))}</td>
+      <td>${ed?`<select class="cell mz-st" data-id="${c.id}" data-field="mzStatus">${MAG_STATUSES.map(x=>`<option${magStatus(c)===x?" selected":""}>${x}</option>`).join("")}</select>`:magPill(magStatus(c))}</td>
+      <td>${ed?linkCell(c.id,"mzCanva",c.mzCanva,"url","Canvaのリンク"):lk(c.mzCanva,"url")}</td>
+      <td>${ed?linkCell(c.id,"magazineUrl",c.magazineUrl,"url","原稿・写真のリンク"):lk(c.magazineUrl,"url")}</td>
+      <td>${ed?cell(c.id,"mzNote",c.mzNote,"text","w-memo"):`<span class="note">${esc(c.mzNote||"")}</span>`}</td>
+      <td style="white-space:nowrap">${md(c.contactedAt)||""}</td></tr>`; };
+  const sec=(label,arr)=>arr.length?`<tr class="mag-sec"><td colspan="${cols}">${label}（${arr.length}人）</td></tr>`+arr.map(row).join(""):"";
+  const body=sec("進行中",open)+sec("投稿完了",done)+sec("見送り",skip) || `<tr class="empty-row"><td colspan="${cols}">${base.length?"条件に合う人がいません":(all?"ルートが「マガジン」の学生はまだいません":"ルートが「マガジン」の学生はまだいません。見込み顧客でルートに「マガジン」を選ぶと、ここに自動で表示されます")}</td></tr>`;
+  const monLabel=m=>`${Number(m.slice(0,4))!==new Date().getFullYear()?m.slice(0,4)+"年":""}${Number(m.slice(5,7))}月`;
+  const openN=pool.filter(c=>!["投稿完了","見送り"].includes(magStatus(c))).length;
+  // 全体：担当者ごとの進捗の表
+  let team="";
+  if(all){
+    const ms=(S.members||[]).filter(m=>base.some(c=>c.ownerUid===m.id));
+    const extra=[...new Set(base.map(c=>c.ownerUid))].filter(id=>!ms.some(m=>m.id===id)).map(id=>({id,name:memberName(id)||"未割当"}));
+    const mm=[...ms,...extra];
+    const cnt=(id,s2)=>base.filter(c=>c.ownerUid===id && (!s2||magStatus(c)===s2) && (!mon || (mon==="open"?magStatus(c)!=="投稿完了":magMonth(c)===mon))).length;
+    team=`<section class="dcard" style="margin-bottom:12px"><h3 style="margin:0 0 8px">担当者ごとの進捗${mon?`（${mon==="open"?"未投稿":monLabel(mon)}）`:""}</h3><div class="scrollx"><table class="t"><tr><th>担当</th>${MAG_STATUSES.map(x=>`<th style="white-space:nowrap">${x}</th>`).join("")}<th>合計</th></tr>
+      ${mm.map(m=>`<tr class="clickable" data-mag-member="${esc(m.id)}" title="この担当者だけ表示"><td style="white-space:nowrap;font-weight:700">${esc(m.name)}</td>${MAG_STATUSES.map(x=>{ const n=cnt(m.id,x); return `<td class="num">${n||'<span class="note">·</span>'}</td>`; }).join("")}<td class="num"><b>${cnt(m.id)}</b></td></tr>`).join("")}
+      <tr><td style="font-weight:900">合計</td>${MAG_STATUSES.map(x=>`<td class="num"><b>${mm.reduce((a,m)=>a+cnt(m.id,x),0)||""}</b></td>`).join("")}<td class="num"><b>${mm.reduce((a,m)=>a+cnt(m.id),0)}</b></td></tr></table></div></section>`;
+  }
+  const memChips=all?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px"><button class="chip${fm?"":" active"}" data-magf="member" data-v="">全員<b>${base.length}</b></button>${(S.members||[]).filter(m=>base.some(c=>c.ownerUid===m.id)).map(m=>`<button class="chip${fm===m.id?" active":""}" data-magf="member" data-v="${esc(m.id)}">${esc(m.name)}<b>${base.filter(c=>c.ownerUid===m.id).length}</b></button>`).join("")}</div>`:"";
+  return `${all?`<p class="note" style="margin:0 0 8px">チーム全員の、ルートが「マガジン」の学生の進捗です（全員が見られます。編集できるのは自分の担当の行だけです）。</p>`:""}
+    ${team}${memChips}
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px"><button class="chip${mon?"":" active"}" data-magf="month" data-v="">すべて<b>${pool.length}</b></button><button class="chip${mon==="open"?" active":""}" data-magf="month" data-v="open">未投稿<b>${openN}</b></button>${months.map(m=>`<button class="chip${mon===m?" active":""}" data-magf="month" data-v="${m}">${monLabel(m)}投稿<b>${pool.filter(c=>magMonth(c)===m).length}</b></button>`).join("")}</div>
+    <div class="mag-sum">${MAG_STATUSES.filter(x=>counts[x]||x===st).map(x=>`<button class="${st===x?"active":""}" data-magf="status" data-v="${st===x?"":esc(x)}"><b>${counts[x]||0}</b>${magPill(x)}</button>`).join("")}</div>
+    ${qBox(key,list.length,"名前・ユーザーネーム・担当者・進捗で検索")}
+    <div class="scrollx"><table class="t iaa-t mag-t"><tr><th class="stk0">No.</th><th class="stk1">名前</th>${all?"<th>担当者</th>":""}<th>ユーザーネーム</th><th>取材日</th><th>投稿日</th><th>進捗</th><th>Canvaリンク</th><th>インタビュー原稿・写真ドライブ</th><th>備考</th><th>登録日</th></tr>${body}${qNoHit(key,cols)}</table></div>
+    <p class="note" style="margin-top:6px">見込み顧客でルートに「マガジン」を選んだ学生が自動で表示されます（ルートが別でも、マガジンの進捗を入れた学生は表示されます）。名前・ユーザーネームは見込み顧客の内容がそのまま出ます。インタビュー原稿のリンクは、IAAの「マガジン原稿」と同じ欄です。</p>`;
 }
 // 全体リストの上部：チーム全員の「日程調整中」（担当者・調整中にしてからの日数・見込み登録からの日数）
 function renderTeamSched(){
@@ -1216,6 +1290,8 @@ function renderBody(){
     case "event": return renderEvent();
     case "overview": return renderOverview(false);
     case "all": return renderTeamSched()+renderOverview(true);
+    case "mag": return renderMag(false);
+    case "magall": return renderMag(true);
     case "admin": return S.isAdmin ? renderAdmin() : `<div class="banner err">この画面は管理者だけが使えます。</div>`;
   }
   return "";
@@ -1379,6 +1455,8 @@ function bindApp(){
 
   // 日程調整
   $$("[data-sched-start]",app).forEach(b=>b.onclick=()=>startSched(b.dataset.schedStart));
+  $$("[data-magf]",app).forEach(b=>b.onclick=()=>{ const key=S.tab; const f=S.magF=S.magF||{}; const ff=f[key]=f[key]||{}; ff[b.dataset.magf]=b.dataset.v; if(b.dataset.magf!=="status") ff.status=""; render(true); });
+  $$("[data-mag-member]",app).forEach(b=>b.onclick=()=>{ const f=S.magF=S.magF||{}; const ff=f.magall=f.magall||{}; ff.member=ff.member===b.dataset.magMember?"":b.dataset.magMember; ff.status=""; render(true); });
   $$("[data-sched-go]",app).forEach(b=>b.onclick=()=>{ S.tab="sched"; S.focusRow=b.dataset.schedGo; LS.set("arxcs_tab",S.tab); render(true); });
   $$("[data-sched-for]",app).forEach(sel=>sel.onchange=()=>savePatch(sel.dataset.schedFor,{schedFor:sel.value}));
   $$("[data-sched-clear]",app).forEach(b=>b.onclick=()=>{ if(b.dataset.confirm!=="1"){ b.dataset.confirm="1"; b.textContent="本当に解除？"; return; } savePatch(b.dataset.schedClear,{schedStatus:""}); });
