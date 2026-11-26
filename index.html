@@ -153,6 +153,7 @@ select.cell.mz-st{min-width:118px;font-weight:700}
 .mag-t .mz-user{width:190px;min-width:190px;max-width:190px}
 .mz-u{display:flex;align-items:center;gap:6px;width:100%}.mz-h{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
 .mz-u .lk-go{flex:none}
+.mz-el{display:inline-block;border-radius:999px;padding:2px 9px;font-weight:800;font-size:12px}.mz-el.el-ok{background:#eef2f7;color:#334155}.mz-el.el-warn{background:#ffedd5;color:#9a3412}.mz-el.el-bad{background:#fee2e2;color:#b91c1c}
 .t.mag-t td{vertical-align:middle}.mag-t .w-link{min-width:150px}
 .pill.s-⑥入会{background:#dcfce7;color:#166534}.pill.s-⑦見送り{background:#f3f4f6;color:#6b7280}.pill.s-イベント{background:#fef3c7;color:#92400e}
 .profile .n{font-weight:900;font-size:13px}.profile .f{font-size:10px;color:var(--sub)}
@@ -451,6 +452,8 @@ function fieldPatch(cur, field, value){
   if(field==="name"){ [w.lastName,w.firstName]=splitName(value); }
   else if(field==="furigana"){ [w.lastNameFurigana,w.firstNameFurigana]=splitName(value); }
   else w[field]=value;
+  // マガジン：インタビュー完了以降にしたのに取材日が空なら、今日を取材日にする（経過日数の起点）
+  if(field==="mzStatus" && value && !["未着手","見送り"].includes(value) && !isDate(cur.mzInterviewDate)) w.mzInterviewDate=todayStr();
   if(field==="enrolled" && value) w.declined="";
   if(field==="declined" && value) w.enrolled="";
   if(field==="proposal" && value==="イベント" && !cur.proposalDate) w.proposalDate=todayStr();
@@ -968,6 +971,28 @@ const magStatus = c => MAG_STATUSES.includes(c.mzStatus) ? c.mzStatus : "未着�
 const magPill = st => `<span class="pill m-${esc(st)}">${esc(st)}</span>`;
 // ユーザーネームの表示用：URLや@つきで入っていても「@ハンドル」にそろえる
 const magHandle = c => { let v=String(c.accountName||c.instagram||"").trim(); if(!v) return ""; const m=v.match(/instagram\.com\/([^/?#\s]+)/i); if(m) v=m[1]; else if(/^https?:/i.test(v)) return v; v=v.split(/[,、\s]+/)[0].replace(/^[@＠]/,""); return v?"@"+v:""; };
+// インタビュー完了（取材日）からの経過日数。投稿完了は「取材→投稿」の日数、取材日が先なら「あとN日」
+const MAG_WARN=7, MAG_ALERT=14;
+function magElapsed(c){
+  const st=magStatus(c), iv=c.mzInterviewDate, t=todayStr();
+  if(st==="見送り" || !isDate(iv)) return null;
+  if(st==="投稿完了") return {kind:"done", d:isDate(c.mzPostDate)?diffDays(iv,c.mzPostDate):null};
+  const d=diffDays(iv,t);
+  if(d<0) return {kind:"future", d:-d};
+  if(st==="未着手") return {kind:"wait", d};
+  if(st==="投稿予約完了") return {kind:"reserved", d}; // 予約済みは滞留に数えない
+  return {kind:"open", d};
+}
+function magElapsedCell(c){
+  const e=magElapsed(c); if(!e) return `<span class="note">—</span>`;
+  if(e.kind==="future") return `<span class="note">取材まであと${e.d}日</span>`;
+  if(e.kind==="done") return (e.d==null||e.d<0)?`<span class="note">—</span>`:`<span class="note">投稿まで${e.d}日</span>`;
+  if(e.kind==="reserved") return `<span class="note">予約済み（取材から${e.d}日）</span>`;
+  if(e.kind==="wait") return `<span class="note">取材日から${e.d}日</span>`;
+  const cls=e.d>=MAG_ALERT?"el-bad":e.d>=MAG_WARN?"el-warn":"el-ok";
+  return `<span class="mz-el ${cls}">${e.d}日</span>`;
+}
+const magOpenDays = c => { const e=magElapsed(c); return e&&e.kind==="open"?e.d:-1; };
 const magMonth = c => isDate(c.mzPostDate) ? c.mzPostDate.slice(0,7) : "";
 function renderMag(all){
   const key=all?"magall":"mag";
@@ -983,11 +1008,12 @@ function renderMag(all){
   const st=ff.status||"";
   const list=st?byMonth.filter(c=>magStatus(c)===st):byMonth;
   const rank=Object.fromEntries(MAG_STATUSES.map((x,i)=>[x,i]));
-  const open=list.filter(c=>!["投稿完了","見送り"].includes(magStatus(c))).sort((a,b)=>rank[magStatus(b)]-rank[magStatus(a)] || (a.mzInterviewDate||"9").localeCompare(b.mzInterviewDate||"9"));
+  const sortEl=(ff.sort||"elapsed")==="elapsed";
+  const open=list.filter(c=>!["投稿完了","見送り"].includes(magStatus(c))).sort((a,b)=> sortEl ? (magOpenDays(b)-magOpenDays(a) || rank[magStatus(b)]-rank[magStatus(a)]) : (rank[magStatus(b)]-rank[magStatus(a)] || (a.mzInterviewDate||"9").localeCompare(b.mzInterviewDate||"9")));
   const done=list.filter(c=>magStatus(c)==="投稿完了").sort((a,b)=>(b.mzPostDate||"").localeCompare(a.mzPostDate||""));
   const skip=list.filter(c=>magStatus(c)==="見送り");
   const canEdit=c=>S.canWrite && (c.ownerUid===S.me || S.isAdmin);
-  const cols=all?11:10;
+  const cols=all?12:11;
   let no=0;
   const row=c=>{ no++; const ed=canEdit(c); const insta=linkHref("insta",c.instagram||c.accountName);
     const tx=v=>esc(v||"")||"—"; const lk=(v,kind)=>{ const h=linkHref(kind,v); return h?`<a class="lk-go" href="${esc(h)}" target="_blank" rel="noopener noreferrer">↗</a>`:`<span class="lk-go off">—</span>`; };
@@ -999,6 +1025,7 @@ function renderMag(all){
       <td>${ed?cell(c.id,"mzInterviewDate",c.mzInterviewDate,"date","w-date"):tx(md(c.mzInterviewDate))}</td>
       <td>${ed?cell(c.id,"mzPostDate",c.mzPostDate,"date","w-date"):tx(md(c.mzPostDate))}</td>
       <td>${ed?`<select class="cell mz-st" data-id="${c.id}" data-field="mzStatus">${MAG_STATUSES.map(x=>`<option${magStatus(c)===x?" selected":""}>${x}</option>`).join("")}</select>`:magPill(magStatus(c))}</td>
+      <td style="white-space:nowrap;text-align:center">${magElapsedCell(c)}</td>
       <td>${ed?linkCell(c.id,"mzCanva",c.mzCanva,"url","Canvaのリンク"):lk(c.mzCanva,"url")}</td>
       <td>${ed?linkCell(c.id,"magazineUrl",c.magazineUrl,"url","原稿・写真のリンク"):lk(c.magazineUrl,"url")}</td>
       <td>${ed?cell(c.id,"mzNote",c.mzNote,"text","w-memo"):`<span class="note">${esc(c.mzNote||"")}</span>`}</td>
@@ -1014,17 +1041,19 @@ function renderMag(all){
     const extra=[...new Set(base.map(c=>c.ownerUid))].filter(id=>!ms.some(m=>m.id===id)).map(id=>({id,name:memberName(id)||"未割当"}));
     const mm=[...ms,...extra];
     const cnt=(id,s2)=>base.filter(c=>c.ownerUid===id && (!s2||magStatus(c)===s2) && (!mon || (mon==="open"?magStatus(c)!=="投稿完了":magMonth(c)===mon))).length;
-    team=`<section class="dcard" style="margin-bottom:12px"><h3 style="margin:0 0 8px">担当者ごとの進捗${mon?`（${mon==="open"?"未投稿":monLabel(mon)}）`:""}</h3><div class="scrollx"><table class="t"><tr><th>担当</th>${MAG_STATUSES.map(x=>`<th style="white-space:nowrap">${x}</th>`).join("")}<th>合計</th></tr>
-      ${mm.map(m=>`<tr class="clickable" data-mag-member="${esc(m.id)}" title="この担当者だけ表示"><td style="white-space:nowrap;font-weight:700">${esc(m.name)}</td>${MAG_STATUSES.map(x=>{ const n=cnt(m.id,x); return `<td class="num">${n||'<span class="note">·</span>'}</td>`; }).join("")}<td class="num"><b>${cnt(m.id)}</b></td></tr>`).join("")}
-      <tr><td style="font-weight:900">合計</td>${MAG_STATUSES.map(x=>`<td class="num"><b>${mm.reduce((a,m)=>a+cnt(m.id,x),0)||""}</b></td>`).join("")}<td class="num"><b>${mm.reduce((a,m)=>a+cnt(m.id),0)}</b></td></tr></table></div></section>`;
+    team=`<section class="dcard" style="margin-bottom:12px"><h3 style="margin:0 0 8px">担当者ごとの進捗${mon?`（${mon==="open"?"未投稿":monLabel(mon)}）`:""}</h3><div class="scrollx"><table class="t"><tr><th>担当</th>${MAG_STATUSES.map(x=>`<th style="white-space:nowrap">${x}</th>`).join("")}<th>合計</th><th style="white-space:nowrap" title="インタビュー完了から${MAG_ALERT}日以上たって、まだ投稿完了していない人">${MAG_ALERT}日以上</th></tr>
+      ${mm.map(m=>`<tr class="clickable" data-mag-member="${esc(m.id)}" title="この担当者だけ表示"><td style="white-space:nowrap;font-weight:700">${esc(m.name)}</td>${MAG_STATUSES.map(x=>{ const n=cnt(m.id,x); return `<td class="num">${n||'<span class="note">·</span>'}</td>`; }).join("")}<td class="num"><b>${cnt(m.id)}</b></td><td class="num">${(()=>{ const n=base.filter(c=>c.ownerUid===m.id&&magOpenDays(c)>=MAG_ALERT).length; return n?`<span class="mz-el el-bad">${n}</span>`:'<span class="note">·</span>'; })()}</td></tr>`).join("")}
+      <tr><td style="font-weight:900">合計</td>${MAG_STATUSES.map(x=>`<td class="num"><b>${mm.reduce((a,m)=>a+cnt(m.id,x),0)||""}</b></td>`).join("")}<td class="num"><b>${mm.reduce((a,m)=>a+cnt(m.id),0)}</b></td><td class="num"><b>${base.filter(c=>magOpenDays(c)>=MAG_ALERT).length||""}</b></td></tr></table></div></section>`;
   }
   const memChips=all?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px"><button class="chip${fm?"":" active"}" data-magf="member" data-v="">全員<b>${base.length}</b></button>${(S.members||[]).filter(m=>base.some(c=>c.ownerUid===m.id)).map(m=>`<button class="chip${fm===m.id?" active":""}" data-magf="member" data-v="${esc(m.id)}">${esc(m.name)}<b>${base.filter(c=>c.ownerUid===m.id).length}</b></button>`).join("")}</div>`:"";
   return `${all?`<p class="note" style="margin:0 0 8px">チーム全員の、ルートが「マガジン」の学生の進捗です（全員が見られます。編集できるのは自分の担当の行だけです）。</p>`:""}
     ${team}${memChips}
     <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px"><button class="chip${mon?"":" active"}" data-magf="month" data-v="">すべて<b>${pool.length}</b></button><button class="chip${mon==="open"?" active":""}" data-magf="month" data-v="open">未投稿<b>${openN}</b></button>${months.map(m=>`<button class="chip${mon===m?" active":""}" data-magf="month" data-v="${m}">${monLabel(m)}投稿<b>${pool.filter(c=>magMonth(c)===m).length}</b></button>`).join("")}</div>
     <div class="mag-sum">${MAG_STATUSES.filter(x=>counts[x]||x===st).map(x=>`<button class="${st===x?"active":""}" data-magf="status" data-v="${st===x?"":esc(x)}"><b>${counts[x]||0}</b>${magPill(x)}</button>`).join("")}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px"><span class="note">進行中の並び順：</span><button class="chip${sortEl?" active":""}" data-magf="sort" data-v="elapsed">経過日数が長い順</button><button class="chip${sortEl?"":" active"}" data-magf="sort" data-v="status">進捗順</button>
+      ${(()=>{ const n=byMonth.filter(c=>magOpenDays(c)>=MAG_ALERT).length, w=byMonth.filter(c=>{const d=magOpenDays(c); return d>=MAG_WARN&&d<MAG_ALERT;}).length; return `<span class="mz-el el-bad" style="margin-left:6px">${MAG_ALERT}日以上 ${n}人</span><span class="mz-el el-warn">${MAG_WARN}〜${MAG_ALERT-1}日 ${w}人</span>`; })()}</div>
     ${qBox(key,list.length,"名前・ユーザーネーム・担当者・進捗で検索")}
-    <div class="scrollx"><table class="t iaa-t mag-t"><tr><th class="stk0">No.</th><th class="stk1">名前</th>${all?"<th>担当者</th>":""}<th class="mz-user">ユーザーネーム</th><th>取材日</th><th>投稿日</th><th>進捗</th><th>Canvaリンク</th><th>インタビュー原稿・写真ドライブ</th><th>備考</th><th>登録日</th></tr>${body}${qNoHit(key,cols)}</table></div>
+    <div class="scrollx"><table class="t iaa-t mag-t"><tr><th class="stk0">No.</th><th class="stk1">名前</th>${all?"<th>担当者</th>":""}<th class="mz-user">ユーザーネーム</th><th>取材日</th><th>投稿日</th><th>進捗</th><th title="インタビュー完了（取材日）から今日まで。投稿完了の人は取材から投稿までの日数">取材からの経過</th><th>Canvaリンク</th><th>インタビュー原稿・写真ドライブ</th><th>備考</th><th>登録日</th></tr>${body}${qNoHit(key,cols)}</table></div>
     <p class="note" style="margin-top:6px">見込み顧客でルートに「マガジン」を選んだ学生が自動で表示されます（ルートが別でも、マガジンの進捗を入れた学生は表示されます）。名前・ユーザーネームは見込み顧客の内容がそのまま出ます。インタビュー原稿のリンクは、IAAの「マガジン原稿」と同じ欄です。</p>`;
 }
 // 全体リストの上部：チーム全員の「日程調整中」（担当者・調整中にしてからの日数・見込み登録からの日数）
@@ -1460,7 +1489,7 @@ function bindApp(){
 
   // 日程調整
   $$("[data-sched-start]",app).forEach(b=>b.onclick=()=>startSched(b.dataset.schedStart));
-  $$("[data-magf]",app).forEach(b=>b.onclick=()=>{ const key=S.tab; const f=S.magF=S.magF||{}; const ff=f[key]=f[key]||{}; ff[b.dataset.magf]=b.dataset.v; if(b.dataset.magf!=="status") ff.status=""; render(true); });
+  $$("[data-magf]",app).forEach(b=>b.onclick=()=>{ const key=S.tab; const f=S.magF=S.magF||{}; const ff=f[key]=f[key]||{}; ff[b.dataset.magf]=b.dataset.v; if(!["status","sort"].includes(b.dataset.magf)) ff.status=""; render(true); });
   $$("[data-mag-member]",app).forEach(b=>b.onclick=()=>{ const f=S.magF=S.magF||{}; const ff=f.magall=f.magall||{}; ff.member=ff.member===b.dataset.magMember?"":b.dataset.magMember; ff.status=""; render(true); });
   $$("[data-sched-go]",app).forEach(b=>b.onclick=()=>{ S.tab="sched"; S.focusRow=b.dataset.schedGo; LS.set("arxcs_tab",S.tab); render(true); });
   $$("[data-sched-for]",app).forEach(sel=>sel.onchange=()=>savePatch(sel.dataset.schedFor,{schedFor:sel.value}));
