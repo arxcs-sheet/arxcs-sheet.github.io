@@ -162,6 +162,10 @@ select.cell.mz-st{min-width:118px;font-weight:700}
 .kpi-v{font-size:28px;font-weight:900;line-height:1.2;margin-top:2px}.kpi-s{font-size:11px;color:var(--sub)}
 .kpi-tables{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px}@media(max-width:1100px){.kpi-tables{grid-template-columns:1fr}}
 .kpi-t th{white-space:nowrap}.kpi-t tr.kpi-sel td{background:#eef3ff}
+.kpi-card.clickable{cursor:pointer;transition:border-color .15s}.kpi-card.clickable:hover{border-color:var(--ink)}
+.kpi-cell{cursor:pointer}.kpi-cell:hover{background:#eef3ff !important;text-decoration:underline}
+.kpi-drill{margin-top:12px;border:1px solid var(--line);border-radius:12px;padding:10px;background:#fbfcfe}
+.kpi-drill-h{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:8px}.kpi-drill-h .btn{margin-left:auto}
 .t.mag-t td{vertical-align:middle}.mag-t .w-link{min-width:150px}
 .pill.s-⑥入会{background:#dcfce7;color:#166534}.pill.s-⑦見送り{background:#f3f4f6;color:#6b7280}.pill.s-イベント{background:#fef3c7;color:#92400e}
 .profile .n{font-weight:900;font-size:13px}.profile .f{font-size:10px;color:var(--sub)}
@@ -1159,14 +1163,30 @@ function stats(nums){ const v=nums.filter(n=>n!==null&&n>=0).sort((a,b)=>a-b); i
    無料体験数   …⑤参加日（モノポリー参加）がその期間の人数
    入会数       …⑥入会の日付がその期間の人数 */
 const KPIS=[
-  {k:"apo",  l:"新規アポ数",  f:(c,p,t)=>inPeriod(c.interview1,p)?1:0},
-  {k:"done", l:"アポ実施数",  f:(c,p,t)=>["interview1","interview2","interview3"].filter(x=>inPeriod(c[x],p)&&c[x]<=t).length},
-  {k:"a2",   l:"A2基準",      f:(c,p,t)=>inPeriod(c.a2,p)?1:0},
-  {k:"touch",l:"有効接点数",  sub:"提案イベント＆DML配布", f:(c,p,t)=>(inPeriod(c.dml,p)||(/イベント/.test(c.proposal||"")&&inPeriod(c.proposalDate,p)))?1:0},
-  {k:"trial",l:"無料体験数",  sub:"モノポリー参加", f:(c,p,t)=>inPeriod(c.participationDate,p)?1:0},
-  {k:"enr",  l:"入会数",      f:(c,p,t)=>inPeriod(c.enrolled,p)?1:0},
+  {k:"apo",  l:"新規アポ数",  d:(c,p,t)=>inPeriod(c.interview1,p)?[["面談1回目",c.interview1]]:[]},
+  {k:"done", l:"アポ実施数",  d:(c,p,t)=>[["interview1","面談1回目"],["interview2","面談2回目"],["interview3","面談3回目"]].filter(([x])=>inPeriod(c[x],p)&&c[x]<=t).map(([x,l])=>[l,c[x]])},
+  {k:"a2",   l:"A2基準",      d:(c,p,t)=>inPeriod(c.a2,p)?[["①A2基準達成",c.a2]]:[]},
+  {k:"touch",l:"有効接点数",  sub:"提案イベント＆DML配布", d:(c,p,t)=>{ const r=[]; if(inPeriod(c.dml,p)) r.push(["②DML動画配布",c.dml]); if(/イベント/.test(c.proposal||"")&&inPeriod(c.proposalDate,p)) r.push(["④提案日（イベント）",c.proposalDate]); return r.length?[r[0],...r.slice(1)]:[]; }, one:true},
+  {k:"trial",l:"無料体験数",  sub:"モノポリー参加", d:(c,p,t)=>inPeriod(c.participationDate,p)?[["⑤参加日",c.participationDate]]:[]},
+  {k:"enr",  l:"入会数",      d:(c,p,t)=>inPeriod(c.enrolled,p)?[["⑥入会",c.enrolled]]:[]},
 ];
+KPIS.forEach(x=>{ x.one=x.k!=="done"; x.f=(c,p,t)=>{ const r=x.d(c,p,t); return x.one?(r.length?1:0):r.length; }; });
 function kpiCount(list,p,t){ const o={}; KPIS.forEach(x=>o[x.k]=0); list.forEach(c=>KPIS.forEach(x=>o[x.k]+=x.f(c,p,t))); return o; }
+function renderKpiDrill(allC,today){
+  const d=S.kpiDrill; if(!d) return "";
+  const x=KPIS.find(k=>k.k===d.k); if(!x) return "";
+  const p={ym:d.ym||"",week:Number(d.week)||0};
+  const rows=allC.filter(c=>!d.who||c.ownerUid===d.who).map(c=>({c,hit:x.d(c,p,today)})).filter(r=>r.hit.length)
+    .sort((a,b)=>b.hit[0][1].localeCompare(a.hit[0][1]));
+  const n=rows.reduce((s2,r)=>s2+(x.one?1:r.hit.length),0);
+  const title=`${x.l}：${d.who?esc(memberName(d.who)||"")+"さん":"全体"}・${p.ym?periodLabel(p):"通算"}`;
+  const body=rows.map(({c,hit})=>{ const mineRow=c.ownerUid===S.me;
+    return `<tr${mineRow?` class="clickable" data-goto="${c.id}" tabindex="0" title="この人の行へ移動"`:""}><td class="stk1" style="min-width:170px">${profileLine(c)}</td><td style="white-space:nowrap;font-weight:700">${esc(ownerOf(c))}</td>
+      <td>${hit.map(([l,dt])=>`<span class="na-chip"><b>${esc(l)}</b>${esc(md(dt))}</span>`).join(" ")}</td><td>${pill(computeStatus(c))}</td><td class="note">${esc(c.route||"")}</td><td style="text-align:right">${mineRow?"›":""}</td></tr>`; }).join("")
+    || `<tr class="empty-row"><td colspan="6">該当する人はいません</td></tr>`;
+  return `<div class="kpi-drill"><div class="kpi-drill-h"><b>${title}</b><span class="note">${x.one?`${rows.length}人`:`${n}件（${rows.length}人）`}・自分の担当の人は押すとその行へ移動します</span><button class="btn" data-kpi-drill-close>閉じる</button></div>
+    <div class="scrollx" style="max-height:420px;overflow:auto"><table class="t"><tr><th class="stk1">名前</th><th>担当者</th><th>該当</th><th>進捗</th><th>ルート</th><th></th></tr>${body}</table></div></div>`;
+}
 function renderKpi(forWho, p, today){
   const allC=S.candidates.filter(c=>nameOf(c));
   const who = S.kpiWho===undefined ? (forWho||"") : S.kpiWho;   // ""=全体
@@ -1174,7 +1194,8 @@ function renderKpi(forWho, p, today){
   const whoLabel=who?(memberName(who)||"")+"さん":"全体";
   const cur=kpiCount(scope,p,today), tot=kpiCount(scope,{},today);
   const pl=p.ym?periodLabel(p):"通算";
-  const cards=KPIS.map(x=>`<div class="kpi-card"><div class="kpi-l">${x.l}${x.sub?`<small>${x.sub}</small>`:""}</div><div class="kpi-v">${cur[x.k]}</div><div class="kpi-s">${p.ym?`通算 ${tot[x.k]}`:"&nbsp;"}</div></div>`).join("");
+  const dz=(k,w,ym,wk)=>` data-kpi-drill="${k}" data-kd-who="${esc(w)}" data-kd-ym="${ym||""}" data-kd-week="${wk||""}" title="押すと該当する人の一覧を表示"`;
+  const cards=KPIS.map(x=>`<div class="kpi-card clickable"${dz(x.k,who,p.ym,p.week)}><div class="kpi-l">${x.l}${x.sub?`<small>${x.sub}</small>`:""}</div><div class="kpi-v">${cur[x.k]}</div><div class="kpi-s">${p.ym?`通算 ${tot[x.k]}`:"&nbsp;"}</div></div>`).join("");
   // 担当者別
   const mode=S.kpiMode||"period";
   const mp=mode==="total"?{}:p;
@@ -1182,20 +1203,20 @@ function renderKpi(forWho, p, today){
     .filter(x=>x.m.active!==false || KPIS.some(k=>x.t[k.k]));
   const sum=kpiCount(allC,mp,today);
   const memTable=`<table class="t kpi-t"><tr><th>担当者</th>${KPIS.map(x=>`<th>${x.l}</th>`).join("")}</tr>
-    ${ms.map(x=>`<tr class="clickable${who===x.m.id?" kpi-sel":""}" data-kpi-who="${esc(x.m.id)}"><td style="white-space:nowrap;font-weight:700">${esc(x.m.name)}</td>${KPIS.map(k=>`<td class="num">${x.v[k.k]||'<span class="note">·</span>'}</td>`).join("")}</tr>`).join("")}
-    <tr class="clickable${who?"":" kpi-sel"}" data-kpi-who=""><td style="font-weight:900">全体</td>${KPIS.map(k=>`<td class="num"><b>${sum[k.k]}</b></td>`).join("")}</tr></table>`;
+    ${ms.map(x=>`<tr class="clickable${who===x.m.id?" kpi-sel":""}" data-kpi-who="${esc(x.m.id)}"><td style="white-space:nowrap;font-weight:700">${esc(x.m.name)}</td>${KPIS.map(k=>`<td class="num kpi-cell"${dz(k.k,x.m.id,mp.ym,mp.week)}>${x.v[k.k]||'<span class="note">·</span>'}</td>`).join("")}</tr>`).join("")}
+    <tr class="clickable${who?"":" kpi-sel"}" data-kpi-who=""><td style="font-weight:900">全体</td>${KPIS.map(k=>`<td class="num kpi-cell"${dz(k.k,"",mp.ym,mp.week)}><b>${sum[k.k]}</b></td>`).join("")}</tr></table>`;
   // 月別の推移
   const set=new Set(); const curYm=today.slice(0,7);
   for(let i=0;i<12;i++){ const d=new Date(Number(curYm.slice(0,4)),Number(curYm.slice(5,7))-1-i,1); set.add(d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")); }
   scope.forEach(c=>["interview1","interview2","interview3","a2","dml","proposalDate","participationDate","enrolled"].forEach(f=>{ const m=/^(\d{4}-\d{2})/.exec(c[f]||""); if(m&&m[1]<=curYm) set.add(m[1]); }));
   const months=[...set].sort().reverse();
   const monTable=`<table class="t kpi-t"><tr><th>月</th>${KPIS.map(x=>`<th>${x.l}</th>`).join("")}</tr>
-    ${months.map(m=>{ const v=kpiCount(scope,{ym:m},today); return `<tr class="${p.ym===m?"kpi-sel":""}"><td style="white-space:nowrap;font-weight:700">${m.slice(0,4)}年${Number(m.slice(5,7))}月</td>${KPIS.map(k=>`<td class="num">${v[k.k]||'<span class="note">·</span>'}</td>`).join("")}</tr>`; }).join("")}
-    <tr><td style="font-weight:900">通算</td>${KPIS.map(k=>`<td class="num"><b>${tot[k.k]}</b></td>`).join("")}</tr></table>`;
+    ${months.map(m=>{ const v=kpiCount(scope,{ym:m},today); return `<tr class="${p.ym===m?"kpi-sel":""}"><td style="white-space:nowrap;font-weight:700">${m.slice(0,4)}年${Number(m.slice(5,7))}月</td>${KPIS.map(k=>`<td class="num kpi-cell"${dz(k.k,who,m,0)}>${v[k.k]||'<span class="note">·</span>'}</td>`).join("")}</tr>`; }).join("")}
+    <tr><td style="font-weight:900">通算</td>${KPIS.map(k=>`<td class="num kpi-cell"${dz(k.k,who,"",0)}><b>${tot[k.k]}</b></td>`).join("")}</tr></table>`;
   return `<section class="dcard kpi-wrap"><div class="kpi-head"><h3 style="margin:0">主要指標（${esc(whoLabel)}・${pl}）</h3>
       <label class="filter">表示<select id="kpiWho"><option value="">全体</option>${(S.members||[]).filter(m=>m.id!=="unassigned"&&(m.active!==false||allC.some(c=>c.ownerUid===m.id))).map(m=>`<option value="${esc(m.id)}"${who===m.id?" selected":""}>${esc(m.name)}</option>`).join("")}</select></label>
       <span class="note">上の「期間」で月・週を選ぶと、その期間の数字になります（全期間＝通算）</span></div>
-    <div class="kpi-cards">${cards}</div>
+    <div class="kpi-cards">${cards}</div>${renderKpiDrill(allC,today)}
     <div class="kpi-tables"><div><div class="dsub first" style="display:flex;gap:6px;align-items:center">担当者別<button class="chip${mode==="period"?" active":""}" data-kpi-mode="period">${p.ym?periodLabel(p):"全期間"}</button><button class="chip${mode==="total"?" active":""}" data-kpi-mode="total">通算</button><span class="note">行を押すとその人の数字に切り替わります</span></div><div class="scrollx">${memTable}</div></div>
     <div><div class="dsub first">月別の推移（${esc(whoLabel)}）</div><div class="scrollx">${monTable}</div></div></div>
     <p class="note" style="margin:8px 0 0">新規アポ数＝面談1回目の日付がその期間の人数（予定を含む）／アポ実施数＝面談1〜3回目のうち実施済みの回数／A2基準＝①A2基準達成の人数／有効接点数＝②DML動画配布、または③提案が「イベント」で④提案日が入った人数／無料体験数＝⑤参加日（モノポリー参加）の人数／入会数＝⑥入会の人数</p></section>`;
@@ -1249,9 +1270,10 @@ function renderDash(forWho, label){
 
   // ファネル
   const fv=kpiCount(own,p.ym?p:{},today);
-  const funnel=[["見込み",p.ym?own.filter(c=>inPeriod(registeredDate(c),p)).length:own.length],...KPIS.map(x=>[x.l,fv[x.k]])];
+  const funnel=[["見込み",p.ym?own.filter(c=>inPeriod(registeredDate(c),p)).length:own.length],...KPIS.map(x=>[x.l,fv[x.k],x.k])];
+  const fz=k=>k?` data-kpi-drill="${k}" data-kd-who="${esc(forWho||"")}" data-kd-ym="${p.ym||""}" data-kd-week="${p.week||""}" style="cursor:pointer" title="押すと該当する人の一覧を表示"`:"";
   const fmax=Math.max(1,funnel[0][1]);
-  const funnelHtml=funnel.map(([l,n],i)=>`<div class="funnel-row"><span>${l}</span><div class="funnel-track"><div class="funnel-bar" style="width:${Math.max(n?4:0,Math.round(n/fmax*100))}%;opacity:${1-i*.1}"></div></div><span class="funnel-num">${n}</span></div>`).join("");
+  const funnelHtml=funnel.map(([l,n,k],i)=>`<div class="funnel-row"${fz(k)}><span>${l}</span><div class="funnel-track"><div class="funnel-bar" style="width:${Math.max(n?4:0,Math.round(n/fmax*100))}%;opacity:${1-i*.1}"></div></div><span class="funnel-num">${n}</span></div>`).join("");
 
   // 移行率
   const iaa=c=>!!c.interview1, a2=c=>!!c.a2, prop=c=>!!(c.proposal||c.proposalDate), part=c=>!!c.participationDate, enr=c=>!!c.enrolled;
@@ -1275,7 +1297,7 @@ function renderDash(forWho, label){
     <div class="note">${shownGoal===0?`「アポ目標」でこの${p.week?"週":"月"}の目標を設定すると、ここに達成率が表示されます。`:`実績＝見込み顧客の「IAA」の日付が${gLabel}の人数`}</div></div></div>
     <div class="dsub">週ごとの目標（${gm}月）</div><div class="mini-list">${["w1","w2","w3","w4"].map((w,i)=>`<div class="mini-row${p.week===i+1?" current":""}"><span>${i+1}週目</span><b>${weekGoal(w)}<small>件</small></b></div>`).join("")}</div>`;
   const mv=kpiCount(own,{ym:today.slice(0,7)},today);
-  const monthHtml=`<div class="dsub">今月の動き</div><div class="mini-list">${KPIS.map(x=>`<div class="mini-row"><span>${x.l}</span><b>${mv[x.k]}<small>件</small></b></div>`).join("")}</div>`;
+  const monthHtml=`<div class="dsub">今月の動き</div><div class="mini-list">${KPIS.map(x=>`<div class="mini-row" data-kpi-drill="${x.k}" data-kd-who="${esc(forWho||"")}" data-kd-ym="${today.slice(0,7)}" data-kd-week="" style="cursor:pointer" title="押すと該当する人の一覧を表示"><span>${x.l}</span><b>${mv[x.k]}<small>件</small></b></div>`).join("")}</div>`;
   const dupCount=own.filter(c=>info[c.id]).length, evCount=own.filter(isEventC).length, decl=own.filter(c=>c.declined).length;
   return `<div class="dash">${periodBar}${renderKpi(forWho, p, today)}<div class="dash-top">
     <section class="dcard"><h3>${p.ym?"アポ目標":"今月のアポ目標"}（${gLabel}）</h3>${goalHtml}</section>
@@ -1617,6 +1639,10 @@ function bindApp(){
   const kw=document.getElementById("kpiWho"); if(kw) kw.onchange=()=>{ S.kpiWho=kw.value; render(true); };
   $$("[data-kpi-who]",app).forEach(b=>b.onclick=()=>{ S.kpiWho=b.dataset.kpiWho; render(true); });
   $$("[data-kpi-mode]",app).forEach(b=>b.onclick=()=>{ S.kpiMode=b.dataset.kpiMode; render(true); });
+  $$("[data-kpi-drill]",app).forEach(b=>b.onclick=e=>{ e.stopPropagation(); const nd={k:b.dataset.kpiDrill,who:b.dataset.kdWho,ym:b.dataset.kdYm,week:b.dataset.kdWeek};
+    const same=S.kpiDrill&&["k","who","ym","week"].every(f=>String(S.kpiDrill[f]||"")===String(nd[f]||"")); S.kpiDrill=same?null:nd; render(true);
+    if(!same) setTimeout(()=>{ const el=document.querySelector(".kpi-drill"); if(el) el.scrollIntoView({behavior:"smooth",block:"nearest"}); },50); });
+  const kdc=document.querySelector("[data-kpi-drill-close]"); if(kdc) kdc.onclick=()=>{ S.kpiDrill=null; render(true); };
   const dm=document.getElementById("dashMonth"); if(dm) dm.onchange=()=>{ S.dashPeriod={ym:dm.value,week:0}; render(true); };
   const dw=document.getElementById("dashWeek"); if(dw) dw.onchange=()=>{ S.dashPeriod={...S.dashPeriod,week:Number(dw.value)||0}; render(true); };
 
