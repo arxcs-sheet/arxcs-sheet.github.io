@@ -1056,15 +1056,36 @@ function renderMag(all){
       <tr><td style="font-weight:900">合計</td>${MAG_STATUSES.map(x=>`<td class="num"><b>${mm.reduce((a,m)=>a+cnt(m.id,x),0)||""}</b></td>`).join("")}<td class="num"><b>${mm.reduce((a,m)=>a+cnt(m.id),0)}</b></td><td class="num"><b>${base.filter(c=>magOpenDays(c)>=MAG_ALERT).length||""}</b></td></tr></table></div></section>`;
   }
   if(all){
-    const posted=base.filter(c=>magStatus(c)==="投稿完了" && isDate(c.mzPostDate));
-    const pm=[...new Set(posted.map(magMonth))].sort().reverse();
-    const pmem=(S.members||[]).filter(m=>posted.some(c=>c.ownerUid===m.id));
-    const ex2=[...new Set(posted.map(c=>c.ownerUid))].filter(id=>!pmem.some(m=>m.id===id)).map(id=>({id,name:memberName(id)||"未割当"}));
-    const cols2=[...pmem,...ex2];
-    const pc=(id,m)=>posted.filter(c=>(!id||c.ownerUid===id)&&(!m||magMonth(c)===m)).length;
-    if(pm.length) team+=`<section class="dcard" style="margin-bottom:12px"><h3 style="margin:0 0 8px">月別の投稿数（投稿完了・投稿日の月）</h3><div class="scrollx"><table class="t"><tr><th>投稿月</th>${cols2.map(m=>`<th style="white-space:nowrap">${esc(m.name)}</th>`).join("")}<th>合計</th></tr>
-      ${pm.map(m=>`<tr class="clickable" data-magf="month" data-v="${m}" title="この月の投稿を表示"><td style="white-space:nowrap;font-weight:700">${monLabel(m)}</td>${cols2.map(x=>{ const n=pc(x.id,m); return `<td class="num">${n||'<span class="note">·</span>'}</td>`; }).join("")}<td class="num"><b>${pc(null,m)}</b></td></tr>`).join("")}
-      <tr><td style="font-weight:900">通算</td>${cols2.map(x=>`<td class="num"><b>${pc(x.id,null)}</b></td>`).join("")}<td class="num"><b>${posted.length}</b></td></tr></table></div></section>`;
+    // 月別の集計：進捗ごと（全員または選んだ担当者）／進捗を1つ選んで担当者ごと
+    //   投稿完了・投稿予約完了は「投稿日」の月、それ以外は「取材日」の月で数える。「取材数」は取材日が入った人（未着手・見送り以外）
+    const PM_ST=["取材数","インタビュー完了","写真待ち","作成中","チェック依頼","チェック完了","投稿予約完了","投稿完了"];
+    const pmode=ff.pmode||"status";
+    const monthOf=(c,st)=>{ const d=(st==="投稿完了"||st==="投稿予約完了")?c.mzPostDate:c.mzInterviewDate; return isDate(d)?d.slice(0,7):""; };
+    const hits=(c,st)=> st==="取材数" ? (isDate(c.mzInterviewDate) && !["未着手","見送り"].includes(magStatus(c))) : magStatus(c)===st;
+    const basisLbl=st=>(st==="投稿完了"||st==="投稿予約完了")?"投稿日の月":"取材日の月";
+    const cntPM=(list,st,m)=>list.filter(c=>hits(c,st)&&monthOf(c,st)&&(!m||monthOf(c,st)===m)).length;
+    const pmChips=`<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px"><button class="chip${pmode==="status"?" active":""}" data-magf="pmode" data-v="status">進捗別</button><span class="note">担当者別：</span>${PM_ST.map(x=>`<button class="chip${pmode===x?" active":""}" data-magf="pmode" data-v="${x}">${x}</button>`).join("")}</div>`;
+    let tbl="";
+    if(pmode==="status"){
+      const src=pool; // 担当者の絞り込みに連動
+      const ms=[...new Set(PM_ST.flatMap(st=>src.filter(c=>hits(c,st)).map(c=>monthOf(c,st))).filter(Boolean))].sort().reverse();
+      tbl=ms.length?`<table class="t"><tr><th>月</th>${PM_ST.map(x=>`<th style="white-space:nowrap" title="${basisLbl(x)}で集計">${x==="取材数"?x:magPill(x)}</th>`).join("")}</tr>
+        ${ms.map(m=>`<tr><td style="white-space:nowrap;font-weight:700">${monLabel(m)}</td>${PM_ST.map(x=>{ const n=cntPM(src,x,m); return `<td class="num">${n||'<span class="note">·</span>'}</td>`; }).join("")}</tr>`).join("")}
+        <tr><td style="font-weight:900">通算</td>${PM_ST.map(x=>`<td class="num"><b>${cntPM(src,x,null)||""}</b></td>`).join("")}</tr></table>`:"";
+      team+=`<section class="dcard" style="margin-bottom:12px"><h3 style="margin:0 0 4px">月別の数字（${fm?esc(memberName(fm)||""):"全員"}・進捗別）</h3><p class="note" style="margin:0 0 8px">取材数・インタビュー完了〜チェック完了は「取材日」の月、投稿予約完了・投稿完了は「投稿日」の月で数えています（進捗は今の状態）。</p>${pmChips}<div class="scrollx">${tbl||'<div class="note">まだデータがありません</div>'}</div></section>`;
+    } else {
+      const st=pmode, list=base.filter(c=>hits(c,st)&&monthOf(c,st));
+      const pm=[...new Set(list.map(c=>monthOf(c,st)))].sort().reverse();
+      const pmem=(S.members||[]).filter(m=>list.some(c=>c.ownerUid===m.id));
+      const ex2=[...new Set(list.map(c=>c.ownerUid))].filter(id=>!pmem.some(m=>m.id===id)).map(id=>({id,name:memberName(id)||"未割当"}));
+      const cols2=[...pmem,...ex2];
+      const pc=(id,m)=>list.filter(c=>(!id||c.ownerUid===id)&&(!m||monthOf(c,st)===m)).length;
+      const isPost=st==="投稿完了";
+      tbl=pm.length?`<table class="t"><tr><th>${basisLbl(st).replace("の月","")}の月</th>${cols2.map(m=>`<th style="white-space:nowrap">${esc(m.name)}</th>`).join("")}<th>合計</th></tr>
+        ${pm.map(m=>`<tr${isPost?` class="clickable" data-magf="month" data-v="${m}" title="この月の投稿を表示"`:""}><td style="white-space:nowrap;font-weight:700">${monLabel(m)}</td>${cols2.map(x=>{ const n=pc(x.id,m); return `<td class="num">${n||'<span class="note">·</span>'}</td>`; }).join("")}<td class="num"><b>${pc(null,m)}</b></td></tr>`).join("")}
+        <tr><td style="font-weight:900">通算</td>${cols2.map(x=>`<td class="num"><b>${pc(x.id,null)}</b></td>`).join("")}<td class="num"><b>${list.length}</b></td></tr></table>`:"";
+      team+=`<section class="dcard" style="margin-bottom:12px"><h3 style="margin:0 0 4px">月別の数字（${esc(st)}・担当者別）</h3><p class="note" style="margin:0 0 8px">${basisLbl(st)}で数えています${st==="取材数"?"（取材日が入っている人。未着手・見送りは除く）":"（進捗は今の状態）"}。</p>${pmChips}<div class="scrollx">${tbl||'<div class="note">まだデータがありません</div>'}</div></section>`;
+    }
   }
   const memChips=all?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px"><button class="chip${fm?"":" active"}" data-magf="member" data-v="">全員<b>${base.length}</b></button>${(S.members||[]).filter(m=>base.some(c=>c.ownerUid===m.id)).map(m=>`<button class="chip${fm===m.id?" active":""}" data-magf="member" data-v="${esc(m.id)}">${esc(m.name)}<b>${base.filter(c=>c.ownerUid===m.id).length}</b></button>`).join("")}</div>`:"";
   return `${all?`<p class="note" style="margin:0 0 8px">チーム全員の、ルートが「マガジン」で面談日が決まった学生の進捗です（全員が見られます。編集できるのは自分の担当の行だけです）。</p>`:""}
@@ -1559,7 +1580,7 @@ function bindApp(){
 
   // 日程調整
   $$("[data-sched-start]",app).forEach(b=>b.onclick=()=>startSched(b.dataset.schedStart));
-  $$("[data-magf]",app).forEach(b=>b.onclick=()=>{ const key=S.tab; const f=S.magF=S.magF||{}; const ff=f[key]=f[key]||{}; ff[b.dataset.magf]=b.dataset.v; if(!["status","sort"].includes(b.dataset.magf)) ff.status=""; render(true); });
+  $$("[data-magf]",app).forEach(b=>b.onclick=()=>{ const key=S.tab; const f=S.magF=S.magF||{}; const ff=f[key]=f[key]||{}; ff[b.dataset.magf]=b.dataset.v; if(!["status","sort","pmode"].includes(b.dataset.magf)) ff.status=""; render(true); });
   $$("[data-mag-member]",app).forEach(b=>b.onclick=()=>{ const f=S.magF=S.magF||{}; const ff=f.magall=f.magall||{}; ff.member=ff.member===b.dataset.magMember?"":b.dataset.magMember; ff.status=""; render(true); });
   $$("[data-sched-go]",app).forEach(b=>b.onclick=()=>{ S.tab="sched"; S.focusRow=b.dataset.schedGo; LS.set("arxcs_tab",S.tab); render(true); });
   $$("[data-sched-for]",app).forEach(sel=>sel.onchange=()=>savePatch(sel.dataset.schedFor,{schedFor:sel.value}));
